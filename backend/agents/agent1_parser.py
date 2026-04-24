@@ -26,6 +26,7 @@ class _GeminiSchema(BaseModel):
     confidence_score: float
     source_url: str
     page_reference: str
+    is_relevant: bool
 
 # ── Flexible model used everywhere else in the app ───────────────────────────
 class GuidelineExtraction(BaseModel):
@@ -102,11 +103,7 @@ def _prebaked_fallback(pdf_source: str) -> GuidelineExtraction:
     if "4" in name: return PREBAKED_RESULTS["tachycardia_monitoring"]
     
     # Ultimate fallback if nothing matches
-    return GuidelineExtraction(
-        biomarker="HRV_SDNN", operator="LT", old_value=28.0, new_value=30.0,
-        unit="ms", duration_days=30, trial_phases=["Phase III"],
-        effective_date="N/A", confidence_score=0.82
-    )
+    raise ValueError("IRRELEVANT_DOCUMENT: The uploaded PDF does not contain relevant regulatory or pharmacovigilance data for this demo.")
 
 def extract_text_from_pdf(filepath_or_url: str) -> str:
     if not fitz:
@@ -144,6 +141,8 @@ async def run_agent1(pdf_source: str) -> GuidelineExtraction:
     Low confidence (below 0.65) = ambiguous, draft, contradictory, or missing specific numbers.
 
     If a field value cannot be determined, use sensible defaults (0.0 for floats, empty string for str, 30 for duration_days).
+    
+    CRITICAL INSTRUCTION: Analyze the text to see if it is a genuine regulatory document or pharmacovigilance guideline. If the text is completely unrelated (e.g. a resume, random article, blank document), set `is_relevant` to false. Otherwise, set it to true.
     """
 
     try:
@@ -156,6 +155,10 @@ async def run_agent1(pdf_source: str) -> GuidelineExtraction:
         )
 
         raw = _GeminiSchema.model_validate_json(response.text)
+        
+        if not raw.is_relevant:
+            raise ValueError("IRRELEVANT_DOCUMENT: Gemini rejected this document. It does not appear to be a valid regulatory guideline.")
+            
         extraction = GuidelineExtraction(
             biomarker=raw.biomarker,
             operator=raw.operator,

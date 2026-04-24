@@ -143,11 +143,11 @@ async def agent3_evaluate_patients(state: PipelineState) -> PipelineState:
                 run_obj.patients_flagged = len(flagged_evals)
                 await db.commit()
                 
-            elapsed = int((time.perf_counter() - start) * 1000)
-            await _log_pipeline(db, run_id, "INFO", f"Agent 3 COMPLETE — {elapsed/1000:.1f}s. Flagged: {len(flagged_evals)}")
-            
             # Hold RUNNING state for realistic demo duration (22-30s) before marking COMPLETE
             await asyncio.sleep(random.uniform(22.0, 30.0))
+            
+            elapsed = int((time.perf_counter() - start) * 1000)
+            await _log_pipeline(db, run_id, "INFO", f"Agent 3 COMPLETE — {elapsed/1000:.1f}s. Flagged: {len(flagged_evals)}")
             
             await _update_agent_status(db, run_id, 3, "Biomarker Sentinel", "COMPLETE", duration=elapsed)
             
