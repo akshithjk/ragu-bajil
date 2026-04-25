@@ -88,7 +88,7 @@ export const BodyViz: React.FC = () => {
           {/* Actions */}
           <div className="pt-4 border-t border-slate-700/50">
             <button 
-              onClick={() => navigate('/dashboard/report/1092')}
+              onClick={() => navigate(`/dashboard/report/${id}`)}
               className="w-full bg-teal-500/10 text-teal-400 hover:bg-teal-500/20 border border-teal-500/30 rounded-lg py-3 flex items-center justify-center gap-2 font-bold transition-all"
             >
               <span className="material-symbols-outlined">download</span>

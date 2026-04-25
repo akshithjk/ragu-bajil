@@ -1,132 +1,128 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
-  Tooltip, ReferenceLine, ResponsiveContainer, ComposedChart, Area
+  Tooltip, ReferenceLine, ResponsiveContainer, Legend
 } from 'recharts';
+import { motion, AnimatePresence } from 'framer-motion';
 import { usePatients, usePatientReadings, useNotifyDoctor } from '../api/queries';
 import { SITE_NAMES } from './DataManagerDashboard';
+
+type FilterMode = 'all' | 'flagged' | 'safe';
 
 export const DoctorDashboard: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const cohortRef = useRef<HTMLDivElement>(null);
-  const chartContainerRef = useRef<HTMLDivElement>(null);
-  
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [showFlaggedOnly, setShowFlaggedOnly] = useState(false);
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
 
   const searchParams = new URLSearchParams(location.search);
-  const targetId = searchParams.get('patient');
-  const urlSite = searchParams.get('site');
-  
-  const { data: patientsData, isLoading } = usePatients(); // Fetch all to resolve any patient
+  const targetId   = searchParams.get('patient');
+  const urlSite    = searchParams.get('site');
+
+  const [selectedId,  setSelectedId]  = useState<string | null>(null);
+  const [filterMode,  setFilterMode]  = useState<FilterMode>('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [toast,       setToast]       = useState<{ message: string; type: 'success'|'error'|'info' } | null>(null);
+  const PATIENTS_PER_PAGE = 10;
+
+  const { data: patientsData, isLoading } = usePatients();
   const notifyDoctor = useNotifyDoctor();
 
-  // Find the requested patient globally to determine their site
-  const allPatients = useMemo(() => patientsData?.data || [], [patientsData]);
-  const resolvedTarget = useMemo(() => {
-    if (!targetId) return null;
-    return allPatients.find((p: any) => p.external_id === targetId || p.id === targetId);
-  }, [allPatients, targetId]);
-
-  // Determine the active site
-  const SITE_ID = urlSite || resolvedTarget?.site_id || 'site-3';
-  const hospitalName = SITE_NAMES[SITE_ID] || 'Unknown Hospital';
-  const siteIndex = SITE_ID.replace('site-', '');
-
-  const patients = useMemo(() => {
-    // Filter to only the active site's cohort
-    const sitePatients = allPatients.filter((p: any) => p.site_id === SITE_ID);
-    return sitePatients.map((p: any) => ({
-      id: p.external_id || p.id,
+  /* ── Derived patient list ── */
+  const allPatients = useMemo(() => {
+    const arr: any[] = patientsData?.data || [];
+    return arr.map((p: any) => ({
+      id:         p.external_id || p.id,
       internalId: p.id,
-      gender: p.id.includes('Female') ? 'Female' : 'Male', // Mock demographic
-      age: 40 + Math.floor(Math.random() * 30), // Mock demographic
-      status: p.is_flagged ? 'AT_RISK' : 'SAFE',
-      hrv: p.latest_hrv != null ? Math.round(p.latest_hrv) : 35,
-      spo2: 96 + Math.floor(Math.random() * 4), // Mock demographic
-      hr: 65 + Math.floor(Math.random() * 20), // Mock demographic
-      flaggedAgo: p.is_flagged ? 'Just now' : undefined,
-      riskContext: p.is_flagged 
-        ? `Breached new FDA threshold in latest pipeline run.`
-        : undefined,
+      siteId:     p.site_id,
+      hospital:   SITE_NAMES[p.site_id] || p.site_id,
+      hrv:        p.latest_hrv != null ? Math.round(p.latest_hrv) : null,
+      hr:         p.latest_hr  != null ? Math.round(p.latest_hr)  : null,
+      status:     p.is_flagged ? 'AT_RISK' : 'SAFE',
     }));
-  }, [allPatients, SITE_ID]);
+  }, [patientsData]);
 
-  useEffect(() => {
-    if (patients.length > 0 && !selectedId) {
-      const searchParams = new URLSearchParams(location.search);
-      const targetId = searchParams.get('patient');
-      
-      if (targetId) {
-        const targetPatient = patients.find(p => p.id === targetId || p.internalId === targetId);
-        if (targetPatient) {
-          setSelectedId(targetPatient.internalId);
-          return;
-        }
-      }
-      
-      // Auto-select first at-risk or first patient if no query param or not found
-      const firstRisk = patients.find(p => p.status === 'AT_RISK');
-      setSelectedId(firstRisk ? firstRisk.internalId : patients[0].internalId);
+  /* Site scoping */
+  const resolvedTarget = useMemo(
+    () => allPatients.find(p => p.id === targetId || p.internalId === targetId),
+    [allPatients, targetId]
+  );
+  const SITE_ID       = urlSite || resolvedTarget?.siteId || 'site-3';
+  const hospitalName  = SITE_NAMES[SITE_ID] || 'Unknown Hospital';
+  const siteIndex     = SITE_ID.replace('site-', '');
+  const sitePatients  = useMemo(() => allPatients.filter(p => p.siteId === SITE_ID), [allPatients, SITE_ID]);
+  const flaggedCount  = sitePatients.filter(p => p.status === 'AT_RISK').length;
+
+  /* Filter + search */
+  const visiblePatients = useMemo(() => {
+    let list = sitePatients;
+    if (filterMode === 'flagged') list = list.filter(p => p.status === 'AT_RISK');
+    if (filterMode === 'safe')    list = list.filter(p => p.status === 'SAFE');
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter(p => p.id.toLowerCase().includes(q) || p.hospital.toLowerCase().includes(q));
     }
-  }, [patients, selectedId, location.search]);
+    return list.sort((a, b) => (a.status === 'AT_RISK' && b.status !== 'AT_RISK' ? -1 : b.status === 'AT_RISK' ? 1 : 0));
+  }, [sitePatients, filterMode, searchQuery]);
 
-  const { data: readingsData } = usePatientReadings(selectedId || '');
+  const totalPages       = Math.ceil(visiblePatients.length / PATIENTS_PER_PAGE);
+  const paginatedPatients = useMemo(() => {
+    const start = (currentPage - 1) * PATIENTS_PER_PAGE;
+    return visiblePatients.slice(start, start + PATIENTS_PER_PAGE);
+  }, [visiblePatients, currentPage]);
+
+  /* Auto-select */
+  const selectedPatient = useMemo(() => {
+    if (selectedId) return sitePatients.find(p => p.internalId === selectedId) || null;
+    if (targetId)   return sitePatients.find(p => p.id === targetId || p.internalId === targetId) || null;
+    return sitePatients.find(p => p.status === 'AT_RISK') || sitePatients[0] || null;
+  }, [sitePatients, selectedId, targetId]);
+
+  /* Readings + trend */
+  const { data: readingsData, isLoading: readingsLoading } = usePatientReadings(
+    selectedPatient?.internalId || ''
+  );
 
   const trendData = useMemo(() => {
-    if (!readingsData?.readings) return [];
-    // Only take HRV_SDNN readings
-    const hrvReadings = readingsData.readings.filter((r: any) => r.biomarker === 'HRV_SDNN');
-    return hrvReadings.map((r: any, idx: number) => ({
-      day: String(idx + 1),
-      hrv: r.value
-    }));
+    if (!readingsData?.readings?.length) return [];
+    const byDay: Record<string, any> = {};
+    readingsData.readings.forEach((r: any) => {
+      const key = new Date(r.recorded_at).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
+      if (!byDay[key]) byDay[key] = { day: key };
+      if (r.biomarker === 'HRV_SDNN')   byDay[key].hrv = parseFloat(r.value.toFixed(1));
+      if (r.biomarker === 'Heart_Rate')  byDay[key].hr  = parseFloat(r.value.toFixed(1));
+    });
+    return Object.values(byDay);
   }, [readingsData]);
 
-  const selected = patients.find((p) => p.internalId === selectedId) || patients[0] || {} as any;
-  const isRisk = selected.status === 'AT_RISK';
-  
-  const visiblePatients = showFlaggedOnly
-    ? patients.filter((p) => p.status === 'AT_RISK')
-    : patients;
-    
-  const flaggedCount = patients.filter(p => p.status === 'AT_RISK').length;
-
-  const showToast = (message: string, type: 'success' | 'error' | 'info') => {
+  /* Helpers */
+  const showToast = (message: string, type: 'success'|'error'|'info') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
   };
 
-  const handleReviewAll = () => {
-    setShowFlaggedOnly(true);
-    const firstFlagged = patients.find((p) => p.status === 'AT_RISK');
-    if (firstFlagged) setSelectedId(firstFlagged.internalId);
-    cohortRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  };
-
   const handleNotify = async () => {
-    if (!selected.internalId) return;
+    if (!selectedPatient?.internalId) return;
     try {
-      const res = await notifyDoctor.mutateAsync(selected.internalId);
-      showToast(`✓ Email notification sent via SendGrid`, 'success');
-    } catch {
-      showToast('Failed to send notification email', 'error');
-    }
+      await notifyDoctor.mutateAsync(selectedPatient.internalId);
+      showToast('✓ Email notification sent via SendGrid', 'success');
+    } catch { showToast('Failed to send notification', 'error'); }
   };
 
-  const yDomain = isRisk ? [20, 40] : [28, 45];
+  const handleFilterMode = (mode: FilterMode) => { setFilterMode(mode); setCurrentPage(1); };
+  const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => { setSearchQuery(e.target.value); setCurrentPage(1); };
+  const handleSelect = (p: any) => { setSelectedId(p.internalId); };
+
+  const isRisk = selectedPatient?.status === 'AT_RISK';
 
   return (
     <div className="p-8 max-w-[1920px] mx-auto space-y-6">
 
       {/* Toast */}
       {toast && (
-        <div className={`fixed top-6 right-6 z-50 flex items-center gap-3 px-5 py-4 rounded-xl shadow-xl border text-sm font-semibold transition-all ${
+        <div className={`fixed top-6 right-6 z-50 flex items-center gap-3 px-5 py-4 rounded-xl shadow-xl border text-sm font-semibold ${
           toast.type === 'success' ? 'bg-green-50 border-green-200 text-green-800' :
-          toast.type === 'error' ? 'bg-red-50 border-red-200 text-red-800' :
+          toast.type === 'error'   ? 'bg-red-50 border-red-200 text-red-800' :
           'bg-blue-50 border-blue-200 text-blue-800'
         }`}>
           <span className="material-symbols-outlined text-base">
@@ -136,311 +132,294 @@ export const DoctorDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* Top Row */}
-      <div className="flex flex-col lg:flex-row gap-6 mb-6">
-        {/* Site Context Card */}
-        <div className="lg:w-[60%] bg-white rounded-xl border border-slate-200 p-5 shadow-sm flex justify-between items-center">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-full bg-teal-100 flex items-center justify-center text-teal-600">
-              <span className="material-symbols-outlined">local_hospital</span>
-            </div>
-            <div>
-              <h2 className="text-xl font-bold text-slate-800">{hospitalName}</h2>
-              <p className="text-sm text-slate-500 font-medium">Site {siteIndex} of 10 • GlucoZen Phase III Trial</p>
-            </div>
-          </div>
-          <div className="text-right">
-            <p className="text-sm font-medium text-slate-500">Active Patients</p>
-            <p className="text-2xl font-bold text-slate-800 tabular-nums">{patients.length}</p>
-          </div>
+      {/* Header */}
+      <div className="flex justify-between items-center">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800">{hospitalName}</h1>
+          <p className="text-slate-500">Site {siteIndex} · GlucoZen Phase III Trial · {sitePatients.length} active patients</p>
         </div>
-
-        {/* Alert Strip - Dynamic Notification Bell */}
-        <div className={`lg:w-[40%] rounded-r-xl p-5 shadow-sm flex items-center justify-between border-l-4 ${
-          flaggedCount > 0 
-            ? 'bg-red-50 border-red-200 border-l-red-500' 
-            : 'bg-green-50 border-green-200 border-l-green-500'
+        <div className={`flex items-center gap-3 px-4 py-2 rounded-xl border text-sm font-semibold ${
+          flaggedCount > 0 ? 'bg-red-50 border-red-200 text-red-700' : 'bg-green-50 border-green-200 text-green-700'
         }`}>
-          <div className="flex items-center gap-3">
-            <span className={`material-symbols-outlined ${flaggedCount > 0 ? 'text-red-500 animate-bounce' : 'text-green-500'}`}>
-              {flaggedCount > 0 ? 'notification_important' : 'check_circle'}
-            </span>
-            <div>
-              <h3 className={`font-bold ${flaggedCount > 0 ? 'text-red-800' : 'text-green-800'}`}>
-                {flaggedCount > 0 ? 'Action Required' : 'All Clear'}
-              </h3>
-              <p className={`text-sm font-medium ${flaggedCount > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                {flaggedCount > 0 ? `${flaggedCount} patients newly flagged for review.` : 'No patients flagged for review at your site.'}
-              </p>
-            </div>
-          </div>
-          {flaggedCount > 0 && (
-            <button
-              onClick={handleReviewAll}
-              className="btn bg-white text-red-700 border border-red-200 shadow-sm text-sm hover:bg-red-50 transition-colors"
-            >
-              {showFlaggedOnly ? (
-                <span
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setShowFlaggedOnly(false);
-                  }}
-                  className="flex items-center gap-1"
-                >
-                  <span className="material-symbols-outlined text-[14px]">close</span>
-                  Show All
-                </span>
-              ) : 'Review All'}
-            </button>
-          )}
+          <span className={`material-symbols-outlined text-sm ${flaggedCount > 0 ? 'animate-bounce' : ''}`}>
+            {flaggedCount > 0 ? 'notification_important' : 'check_circle'}
+          </span>
+          {flaggedCount > 0 ? `${flaggedCount} patients at risk` : 'All clear'}
         </div>
       </div>
 
-      <div className="flex flex-col lg:flex-row gap-8">
+      {/* Main content: table left, detail panel right */}
+      <div className="flex flex-col xl:flex-row gap-6">
 
-        {/* Left: Patient Grid */}
-        <div className="lg:w-[55%] space-y-6" ref={cohortRef}>
-          <div className="flex justify-between items-center">
-            <h3 className="font-bold text-slate-800">
-              Patient Cohort (Site {siteIndex})
-              {showFlaggedOnly && (
-                <span className="ml-2 text-xs font-semibold text-red-600 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">
-                  Flagged Only
-                </span>
-              )}
-            </h3>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setShowFlaggedOnly(false)}
-                className={`badge cursor-pointer transition-colors ${!showFlaggedOnly ? 'bg-primary text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-              >
-                All ({patients.length})
-              </button>
-              <button
-                onClick={() => setShowFlaggedOnly(true)}
-                className={`badge cursor-pointer transition-colors ${showFlaggedOnly ? 'bg-red-500 text-white' : 'bg-red-100 text-red-700 hover:bg-red-200'}`}
-              >
-                Flagged ({flaggedCount})
-              </button>
+        {/* ── LEFT: Table + Filter ── */}
+        <div className="flex-1 min-w-0 space-y-4">
+
+          {/* Filter Bar — identical to DataManager */}
+          <div className="flex justify-between items-center flex-wrap gap-3">
+            <div className="flex gap-2 flex-wrap">
+              {(['all', 'flagged', 'safe'] as FilterMode[]).map(mode => {
+                const labels: Record<FilterMode, string> = {
+                  all: 'All Patients',
+                  flagged: '⚠ AT RISK Only',
+                  safe: '✓ Safe Only',
+                };
+                const isActive = filterMode === mode;
+                return (
+                  <button key={mode} onClick={() => handleFilterMode(mode)}
+                    className={`btn px-4 py-2 transition-all text-sm ${
+                      isActive
+                        ? mode === 'flagged' ? 'bg-red-600 border-red-600 text-white' : 'btn-primary'
+                        : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    {labels[mode]}
+                  </button>
+                );
+              })}
+              <span className="text-sm text-slate-400 self-center ml-2">
+                Showing <strong className="text-slate-700">{visiblePatients.length}</strong> patients
+              </span>
+            </div>
+            {/* Search */}
+            <div className="relative w-72">
+              <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">search</span>
+              <input type="text" placeholder="Search by ID or Hospital..."
+                value={searchQuery} onChange={handleSearch}
+                className="w-full pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all shadow-sm"
+              />
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {isLoading ? (
-              <div className="col-span-3 py-12 flex flex-col items-center justify-center text-slate-400">
-                <span className="w-8 h-8 border-2 border-slate-300 border-t-primary rounded-full animate-spin mb-4" />
-                <p>Loading your patients...</p>
-              </div>
-            ) : visiblePatients.length === 0 ? (
-              <div className="col-span-3 py-12 text-center text-slate-400">
-                <p>No patients match the current filter.</p>
-              </div>
-            ) : (
-              visiblePatients.map((p) => {
-                const isSelected = p.internalId === selectedId;
-                const pIsRisk = p.status === 'AT_RISK';
-                return (
-                  <div
-                    key={p.internalId}
-                    onClick={() => setSelectedId(p.internalId)}
-                    className={`bg-white rounded-xl p-4 cursor-pointer relative overflow-hidden transition-all duration-200 ${
-                      isSelected
-                        ? 'border-2 border-primary shadow-lg shadow-blue-100'
-                        : 'border border-slate-200 shadow-sm hover:border-slate-300 hover:shadow-md'
-                    }`}
-                  >
-                    {pIsRisk && (
-                      <div className="absolute top-0 left-0 w-1 h-full bg-red-500" />
-                    )}
-                    <div className={`flex justify-between items-start mb-4 ${pIsRisk ? 'pl-2' : ''}`}>
-                      <div>
-                        <span className="font-mono text-lg font-bold text-slate-800">{p.id}</span>
-                        <p className="text-[10px] text-slate-400 mt-1 uppercase font-bold tracking-wider">
-                          {p.gender} • {p.age} yrs
-                        </p>
-                      </div>
-                      <span className={`badge border text-xs ${
-                        pIsRisk
-                          ? 'bg-red-100 text-red-700 border-red-200 animate-pulse'
-                          : 'bg-green-100 text-green-700 border-green-200'
-                      }`}>
-                        {pIsRisk ? 'AT RISK' : 'SAFE'}
-                      </span>
+          {/* Table — identical structure to DataManager */}
+          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-200 text-slate-500">
+                  <th className="px-6 py-4 font-semibold">Patient ID</th>
+                  <th className="px-6 py-4 font-semibold">Site</th>
+                  <th className="px-6 py-4 font-semibold">Hospital</th>
+                  <th className="px-6 py-4 font-semibold">HRV (latest)</th>
+                  <th className="px-6 py-4 font-semibold">Heart Rate</th>
+                  <th className="px-6 py-4 font-semibold">Status</th>
+                  <th className="px-6 py-4 font-semibold">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {isLoading ? (
+                  <tr><td colSpan={7} className="px-6 py-12 text-center">
+                    <div className="flex items-center justify-center gap-3 text-slate-400">
+                      <span className="w-5 h-5 border-2 border-slate-300 border-t-blue-400 rounded-full animate-spin" />
+                      Loading patients...
                     </div>
-                    <div className={`space-y-2 ${pIsRisk ? 'pl-2' : ''}`}>
-                      <div className="flex justify-between">
-                        <span className="text-xs text-slate-500 font-medium">HRV (latest)</span>
-                        <span className={`text-xs font-bold ${pIsRisk ? 'text-red-600' : 'text-slate-700'}`}>
-                          {p.hrv}ms
-                          {pIsRisk && (
-                            <span className="material-symbols-outlined text-[12px] align-middle ml-0.5">trending_down</span>
-                          )}
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-xs text-slate-500 font-medium">SpO2</span>
-                        <span className="text-xs font-bold text-slate-700">{p.spo2}%</span>
-                      </div>
-                    </div>
+                  </td></tr>
+                ) : visiblePatients.length === 0 ? (
+                  <tr><td colSpan={7} className="px-6 py-12 text-center text-slate-400">No patients match the current filter.</td></tr>
+                ) : (
+                  <AnimatePresence mode="popLayout">
+                    {paginatedPatients.map((p: any, idx: number) => {
+                      const pIsRisk = p.status === 'AT_RISK';
+                      const isSelected = selectedPatient?.internalId === p.internalId;
+                      return (
+                        <motion.tr
+                          layout
+                          key={p.internalId}
+                          initial={{ opacity: 0, y: 8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, scale: 0.97 }}
+                          transition={{ duration: 0.18, delay: idx * 0.03 }}
+                          onClick={() => handleSelect(p)}
+                          className={`relative cursor-pointer transition-colors ${
+                            isSelected ? 'bg-blue-50/60 ring-1 ring-inset ring-primary/20' :
+                            pIsRisk ? 'bg-red-50/30 hover:bg-red-50/60' : 'hover:bg-slate-50/60'
+                          }`}
+                        >
+                          <td className="px-6 py-3.5 font-mono font-bold text-slate-800">
+                            {pIsRisk && <div className="absolute left-0 top-0 bottom-0 w-[3px] bg-red-500 rounded-r" />}
+                            {p.id}
+                          </td>
+                          <td className="px-6 py-3.5 text-slate-500 text-xs font-mono">{p.siteId}</td>
+                          <td className="px-6 py-3.5 text-slate-600">{p.hospital}</td>
+                          <td className={`px-6 py-3.5 font-mono font-bold ${pIsRisk && (!p.hr || p.hr <= 95) ? 'text-red-600' : 'text-slate-700'}`}>
+                            {p.hrv != null ? `${p.hrv}ms` : '—'}
+                          </td>
+                          <td className={`px-6 py-3.5 font-mono font-bold ${pIsRisk && p.hr > 95 ? 'text-red-600' : 'text-slate-700'}`}>
+                            {p.hr != null ? `${p.hr} bpm` : '—'}
+                          </td>
+                          <td className="px-6 py-3.5">
+                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold ${
+                              pIsRisk ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
+                            }`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${pIsRisk ? 'bg-red-500 animate-pulse' : 'bg-green-500'}`} />
+                              {pIsRisk ? 'AT RISK' : 'SAFE'}
+                            </span>
+                          </td>
+                          <td className="px-6 py-3.5">
+                            <button
+                              onClick={e => { e.stopPropagation(); handleSelect(p); }}
+                              className={`text-sm font-semibold hover:underline transition-colors ${pIsRisk ? 'text-primary' : 'text-slate-400 hover:text-primary'}`}
+                            >
+                              View Details
+                            </button>
+                          </td>
+                        </motion.tr>
+                      );
+                    })}
+                  </AnimatePresence>
+                )}
+              </tbody>
+            </table>
+
+            {/* Pagination — identical to DataManager */}
+            {totalPages > 1 && (() => {
+              // Build a clean page window — never more than 7 items including ellipses
+              const pages: (number | '...')[] = [];
+              if (totalPages <= 7) {
+                for (let i = 1; i <= totalPages; i++) pages.push(i);
+              } else if (currentPage <= 4) {
+                pages.push(1,2,3,4,5,'...',totalPages);
+              } else if (currentPage >= totalPages - 3) {
+                pages.push(1,'...',totalPages-4,totalPages-3,totalPages-2,totalPages-1,totalPages);
+              } else {
+                pages.push(1,'...',currentPage-1,currentPage,currentPage+1,'...',totalPages);
+              }
+              return (
+                <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
+                  <span className="text-sm text-slate-500">
+                    Showing <strong className="text-slate-800">{(currentPage - 1) * PATIENTS_PER_PAGE + 1}</strong> to{' '}
+                    <strong className="text-slate-800">{Math.min(currentPage * PATIENTS_PER_PAGE, visiblePatients.length)}</strong> of{' '}
+                    <strong className="text-slate-800">{visiblePatients.length}</strong>
+                  </span>
+                  <div className="flex gap-1.5 items-center">
+                    <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1}
+                      className="w-8 h-8 flex items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+                      <span className="material-symbols-outlined text-sm">chevron_left</span>
+                    </button>
+                    {pages.map((pg, i) => pg === '...' ? (
+                      <span key={`dots-${i}`} className="w-8 h-8 flex items-center justify-center text-slate-400 text-sm">…</span>
+                    ) : (
+                      <button key={pg} onClick={() => setCurrentPage(pg as number)}
+                        className={`w-8 h-8 flex items-center justify-center rounded-lg text-sm font-semibold transition-all ${
+                          currentPage === pg
+                            ? 'bg-primary text-white shadow-md shadow-primary/30'
+                            : 'border border-slate-200 text-slate-600 hover:bg-slate-100'
+                        }`}>{pg}</button>
+                    ))}
+                    <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}
+                      className="w-8 h-8 flex items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+                      <span className="material-symbols-outlined text-sm">chevron_right</span>
+                    </button>
                   </div>
-                );
-              })
-            )}
+                </div>
+              );
+            })()}
           </div>
         </div>
 
-        {/* Right: Sticky Detail Panel */}
-        <div className="lg:w-[45%]">
-          {selected.internalId && (
-            <div className="sticky top-24 bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden">
+        {/* ── RIGHT: Sticky Detail Panel ── */}
+        <div className="xl:w-[380px] shrink-0">
+          {selectedPatient ? (
+            <div className="sticky top-20 bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden">
 
-              {/* Header */}
-              <div className="p-6 border-b border-slate-100 bg-slate-50 flex justify-between items-start">
+              {/* Panel Header */}
+              <div className={`p-5 border-b flex justify-between items-start ${isRisk ? 'bg-red-50 border-red-100' : 'bg-slate-50 border-slate-100'}`}>
                 <div>
-                  <div className="flex items-center gap-3 mb-2">
-                    <h2 className="text-2xl font-mono font-bold text-slate-800">{selected.id}</h2>
-                    <span className={`badge text-xs py-1 border ${
-                      isRisk
-                        ? 'bg-red-100 text-red-700 border-red-200'
-                        : 'bg-green-100 text-green-700 border-green-200'
-                    }`}>
-                      {isRisk ? 'AT RISK' : 'SAFE'}
-                    </span>
+                  <div className="flex items-center gap-2 mb-1">
+                    <h2 className="text-xl font-mono font-bold text-slate-800">{selectedPatient.id}</h2>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                      isRisk ? 'bg-red-100 text-red-700 border-red-200 animate-pulse' : 'bg-green-100 text-green-700 border-green-200'
+                    }`}>{isRisk ? 'AT RISK' : 'SAFE'}</span>
                   </div>
-                  <p className="text-xs text-slate-500 font-medium flex items-center gap-1">
-                    <span className="material-symbols-outlined text-[14px]">person</span>
-                    {selected.gender} • {selected.age} yrs
-                    {selected.flaggedAgo && (
-                      <>
-                        <span className="mx-1 text-slate-300">•</span>
-                        <span className="material-symbols-outlined text-[14px]">history</span>
-                        Flagged {selected.flaggedAgo}
-                      </>
-                    )}
-                  </p>
+                  <p className="text-xs text-slate-500">{selectedPatient.hospital} · {selectedPatient.siteId}</p>
                 </div>
-                <button
-                  onClick={() => navigate(`/dashboard/doctor/patient/${selected.internalId}/viz`)}
-                  className="btn bg-slate-800 text-white hover:bg-slate-700 shadow-lg text-sm flex items-center gap-2"
-                >
-                  <span className="material-symbols-outlined text-[18px]">view_in_ar</span>
-                  3D Body Scan
-                </button>
               </div>
 
-              <div className="p-6 space-y-6">
-
-                {/* Mini Stats */}
-                <div className="grid grid-cols-3 gap-3">
-                  <div className={`rounded-lg p-3 text-center border ${isRisk ? 'bg-red-50 border-red-100' : 'bg-green-50 border-green-100'}`}>
-                    <div className={`text-xs font-medium mb-1 ${isRisk ? 'text-red-800' : 'text-green-800'}`}>HRV</div>
-                    <div className={`text-xl font-bold ${isRisk ? 'text-red-600' : 'text-green-600'}`}>
-                      {selected.hrv}<span className={`text-xs ml-1 ${isRisk ? 'text-red-400' : 'text-green-400'}`}>ms</span>
-                    </div>
-                  </div>
-                  <div className="bg-slate-50 border border-slate-100 rounded-lg p-3 text-center">
-                    <div className="text-xs font-medium text-slate-500 mb-1">SpO2</div>
-                    <div className="text-xl font-bold text-slate-700">{selected.spo2}<span className="text-xs text-slate-400 ml-1">%</span></div>
-                  </div>
-                  <div className="bg-slate-50 border border-slate-100 rounded-lg p-3 text-center">
-                    <div className="text-xs font-medium text-slate-500 mb-1">Heart Rate</div>
-                    <div className="text-xl font-bold text-slate-700">{selected.hr}<span className="text-xs text-slate-400 ml-1">bpm</span></div>
-                  </div>
-                </div>
-
-                {/* Chart */}
-                <div>
-                  <h3 className="text-sm font-bold text-slate-800 mb-3 flex items-center gap-2">
-                    <span className="material-symbols-outlined text-slate-400 text-[18px]">monitoring</span>
-                    Real 30-Day HRV Trend
-                  </h3>
-                  <div
-                    ref={chartContainerRef}
-                    className="border border-slate-100 rounded-xl bg-slate-50 p-2 overflow-hidden"
-                    style={{ height: 180 }}
-                  >
-                    <ResponsiveContainer width="100%" height={156}>
-                      <ComposedChart
-                        data={trendData}
-                        margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
-                      >
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
-                        <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748B' }} />
-                        <YAxis domain={yDomain} axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748B' }} />
-                        <Tooltip
-                          contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: 12 }}
-                          itemStyle={{ color: '#0F172A', fontWeight: 'bold' }}
-                          formatter={(v: number) => [`${Math.round(v)} ms`, 'HRV']}
-                          labelFormatter={(l) => `Day ${l}`}
-                        />
-                        <ReferenceLine y={25} stroke="#94A3B8" strokeDasharray="4 4"
-                          label={{ position: 'insideTopLeft', value: 'v1.2 (25ms)', fill: '#94A3B8', fontSize: 9 }} />
-                        <ReferenceLine y={28} stroke="#EF4444"
-                          label={{ position: 'insideBottomLeft', value: 'v1.3 (28ms)', fill: '#EF4444', fontSize: 9, fontWeight: 'bold' }} />
-                        <Area type="monotone" dataKey="hrv" fill={isRisk ? '#fef2f2' : '#ecfdf5'} stroke="none" />
-                        <Line
-                          type="monotone" dataKey="hrv"
-                          stroke={isRisk ? '#EF4444' : '#10B981'}
-                          strokeWidth={2.5}
-                          dot={false}
-                          activeDot={{ r: 5 }}
-                          isAnimationActive={true}
-                        />
-                      </ComposedChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-
-                {/* Rule Comparison — only shown for at-risk */}
-                {isRisk && selected.riskContext && (
-                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-                    <div className="flex items-start gap-3">
-                      <span className="material-symbols-outlined text-amber-500 mt-0.5">info</span>
-                      <div>
-                        <h4 className="text-sm font-bold text-amber-900 mb-1">Regulatory Context</h4>
-                        <p className="text-xs text-amber-800 leading-relaxed mb-3">{selected.riskContext}</p>
-                        <div className="flex gap-4 text-xs font-medium">
-                          <div className="flex items-center gap-1.5 bg-white px-2 py-1 rounded border border-amber-100">
-                            <span className="w-2 h-2 rounded-full bg-green-500" />
-                            <span className="text-slate-600">v1.2: SAFE</span>
-                          </div>
-                          <div className="flex items-center gap-1.5 bg-white px-2 py-1 rounded border border-amber-100 shadow-sm">
-                            <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                            <span className="text-slate-800 font-bold">v1.3: AT RISK</span>
-                          </div>
-                        </div>
+              <div className="p-5 space-y-5">
+                {/* Biomarker Stats */}
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { label: 'HRV', val: selectedPatient.hrv, unit: 'ms',  flagged: isRisk && (!selectedPatient.hr || selectedPatient.hr <= 95) },
+                    { label: 'SpO2', val: 98,                   unit: '%',  flagged: false },
+                    { label: 'HR',   val: selectedPatient.hr,   unit: 'bpm', flagged: isRisk && selectedPatient.hr > 95 },
+                  ].map(({ label, val, unit, flagged }) => (
+                    <div key={label} className={`rounded-xl p-3 text-center border ${flagged ? 'bg-red-50 border-red-200' : 'bg-slate-50 border-slate-100'}`}>
+                      <div className={`text-[9px] font-bold uppercase tracking-wider mb-1 ${flagged ? 'text-red-600' : 'text-slate-500'}`}>{label}</div>
+                      <div className={`text-lg font-bold tabular-nums ${flagged ? 'text-red-600' : 'text-slate-700'}`}>
+                        {val != null ? val : '—'}<span className="text-[10px] ml-0.5 opacity-60">{unit}</span>
                       </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Chart — key forces full remount on patient switch */}
+                <div>
+                  <h3 className="text-xs font-bold text-slate-600 uppercase tracking-wider mb-2 flex items-center gap-1">
+                    <span className="material-symbols-outlined text-[14px] text-slate-400">monitoring</span>
+                    30-Day Trend · HRV &amp; Heart Rate
+                  </h3>
+                  <div className="border border-slate-100 rounded-xl bg-slate-50 overflow-hidden" style={{ height: 210 }}>
+                    {trendData.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center h-full text-slate-400 text-xs gap-1">
+                        <span className="material-symbols-outlined text-2xl">show_chart</span>
+                        No readings yet
+                      </div>
+                    ) : (
+                      <LineChart key={`chart-${selectedPatient.internalId}`} width={340} height={210} data={trendData} margin={{ top: 10, right: 12, left: -20, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
+                        <XAxis dataKey="day" axisLine={false} tickLine={false}
+                          tick={{ fontSize: 8, fill: '#94A3B8' }} interval="preserveStartEnd" />
+                        <YAxis yAxisId="left"  domain={[15, 50]}  axisLine={false} tickLine={false} tick={{ fontSize: 8, fill: '#94A3B8' }} width={26} />
+                        <YAxis yAxisId="right" orientation="right" domain={[45, 115]} axisLine={false} tickLine={false} tick={{ fontSize: 8, fill: '#94A3B8' }} width={26} />
+                        <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)', fontSize: 10 }} />
+                        <Legend iconType="circle" iconSize={7} wrapperStyle={{ fontSize: 9, paddingTop: 2 }} />
+                        <ReferenceLine yAxisId="left"  y={28} stroke="#CBD5E1" strokeDasharray="4 4" />
+                        <ReferenceLine yAxisId="right" y={95} stroke="#FCA5A5" strokeDasharray="4 4" />
+                        <Line yAxisId="left"  name="HRV (ms)"  type="monotone" dataKey="hrv"
+                          stroke="#10B981" strokeWidth={2} dot={false} activeDot={{ r: 3 }} isAnimationActive={false} connectNulls />
+                        <Line yAxisId="right" name="HR (bpm)"  type="monotone" dataKey="hr"
+                          stroke="#F59E0B" strokeWidth={2} dot={false} activeDot={{ r: 3 }} isAnimationActive={false} connectNulls />
+                      </LineChart>
+                    )}
+                  </div>
+                </div>
+
+                {/* Risk Context */}
+                {isRisk && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800">
+                    <div className="flex items-center gap-1.5 font-bold mb-1">
+                      <span className="material-symbols-outlined text-amber-500 text-[14px]">info</span>
+                      Regulatory Context
+                    </div>
+                    <p className="leading-relaxed mb-2">Breached new FDA HRV threshold (v1.3: &lt;28ms) in latest pipeline run.</p>
+                    <div className="flex gap-2">
+                      <span className="bg-white px-2 py-0.5 rounded border border-amber-100 text-slate-600">v1.2: SAFE</span>
+                      <span className="bg-white px-2 py-0.5 rounded border border-amber-100 font-bold text-slate-800">v1.3: AT RISK</span>
                     </div>
                   </div>
                 )}
 
                 {/* CTAs */}
-                <div className="pt-2 flex gap-3">
-                  <button
-                    onClick={() => navigate('/dashboard/report/1092')}
-                    className="btn flex-1 justify-center py-2.5 bg-slate-800 hover:bg-slate-900 text-white shadow-lg"
-                  >
-                    <span className="material-symbols-outlined text-[18px] mr-1.5">description</span>
+                <div className="flex gap-2">
+                  <button onClick={() => navigate(`/dashboard/report/${selectedPatient.id}`)}
+                    className="btn flex-1 justify-center py-2 bg-slate-800 hover:bg-slate-900 text-white shadow text-xs transition-all hover:-translate-y-0.5">
+                    <span className="material-symbols-outlined text-[15px] mr-1">description</span>
                     View Report
                   </button>
-                  <button
-                    onClick={handleNotify}
-                    disabled={notifyDoctor.isPending}
-                    className="btn flex-1 justify-center py-2.5 bg-amber-500 hover:bg-amber-600 text-white shadow-lg shadow-amber-500/30 disabled:opacity-60"
-                  >
-                    <span className="material-symbols-outlined text-[18px] mr-1.5">mail</span>
-                    {notifyDoctor.isPending ? 'Sending...' : 'Test SendGrid Alert'}
+                  <button onClick={handleNotify} disabled={notifyDoctor.isPending}
+                    className="btn flex-1 justify-center py-2 bg-amber-500 hover:bg-amber-600 text-white shadow shadow-amber-500/30 text-xs disabled:opacity-60 transition-all hover:-translate-y-0.5">
+                    <span className="material-symbols-outlined text-[15px] mr-1">mail</span>
+                    {notifyDoctor.isPending ? 'Sending...' : 'SendGrid Alert'}
                   </button>
                 </div>
-                <p className="text-center text-[11px] text-slate-400 mt-3 uppercase tracking-wider font-semibold">
-                  Scoped to Site {siteIndex} Only
-                </p>
-
+                <p className="text-center text-[10px] text-slate-400 uppercase tracking-wider">Scoped to Site {siteIndex} Only</p>
               </div>
+            </div>
+          ) : (
+            <div className="xl:w-[380px] flex flex-col items-center justify-center h-64 bg-white rounded-2xl border border-slate-200 text-slate-400">
+              <span className="material-symbols-outlined text-5xl mb-3">person_search</span>
+              <p className="text-sm font-medium">Click a row to view patient details</p>
             </div>
           )}
         </div>
-
       </div>
     </div>
   );

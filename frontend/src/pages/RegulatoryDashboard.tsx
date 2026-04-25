@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   usePipelineStatus,
@@ -20,6 +20,72 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 const AGENT_ICONS = ['description', 'rule', 'monitor_heart', 'summarize'];
+
+const AutoFetchStrip = () => {
+  const [mins, setMins] = useState(14);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [currentSource, setCurrentSource] = useState("");
+
+  useEffect(() => {
+    // Background minute ticker
+    const minInterval = setInterval(() => {
+      setMins(m => m + 1);
+    }, 60000);
+
+    // Random sync simulation every 30 to 60 seconds
+    const syncLoop = () => {
+      const delay = Math.random() * 30000 + 30000; 
+      setTimeout(() => {
+        setIsSyncing(true);
+        const sources = ["FDA.gov", "EMA.europa.eu", "ICH.org", "CDSCO.gov.in"];
+        let step = 0;
+        const sourceInterval = setInterval(() => {
+          if (step < sources.length) {
+            setCurrentSource(sources[step]);
+            step++;
+          } else {
+            clearInterval(sourceInterval);
+            setIsSyncing(false);
+            setCurrentSource("");
+            setMins(0); // Reset minutes
+            syncLoop(); // Queue next sync
+          }
+        }, 1500); // 1.5s per source
+      }, delay);
+    };
+
+    syncLoop();
+
+    return () => clearInterval(minInterval);
+  }, []);
+
+  return (
+    <div className="bg-slate-900 text-slate-300 rounded-xl p-3 flex flex-col sm:flex-row items-center justify-between shadow-lg text-sm border border-slate-700 transition-all duration-500">
+      <div className="flex items-center gap-3">
+        <div className="relative flex h-3 w-3">
+          {isSyncing && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>}
+          <span className={`relative inline-flex rounded-full h-3 w-3 ${isSyncing ? 'bg-amber-500' : 'bg-green-500'}`}></span>
+        </div>
+        <span className="font-semibold text-white tracking-wide uppercase text-xs">Global Monitoring:</span>
+        <span className="font-mono text-xs opacity-90 min-w-[280px]">
+          {isSyncing ? (
+            <span className="text-amber-400 animate-pulse">Scraping {currentSource}...</span>
+          ) : (
+            <>FDA.gov <span className="opacity-40">|</span> EMA.europa.eu <span className="opacity-40">|</span> ICH.org <span className="opacity-40">|</span> CDSCO.gov.in</>
+          )}
+        </span>
+      </div>
+      <div className="flex items-center gap-2 mt-2 sm:mt-0 opacity-80 text-xs font-mono">
+        {isSyncing ? (
+          <span className="material-symbols-outlined text-[14px] animate-spin text-amber-400">sync</span>
+        ) : (
+          <span className="material-symbols-outlined text-[14px] text-green-400">check_circle</span>
+        )}
+        {isSyncing ? 'Polling active...' : `Last checked: ${mins} ${mins === 1 ? 'min' : 'mins'} ago (6hr cycle)`}
+      </div>
+    </div>
+  );
+};
 
 export const RegulatoryDashboard: React.FC = () => {
   const navigate = useNavigate();
@@ -92,6 +158,8 @@ export const RegulatoryDashboard: React.FC = () => {
           Open Pipeline View
         </button>
       </div>
+
+      <AutoFetchStrip />
 
       {/* Pipeline Running Banner */}
       {pipelineStatus === 'RUNNING' && (

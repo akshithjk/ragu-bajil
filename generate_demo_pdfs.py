@@ -144,11 +144,11 @@ def make_pdf1():
     print("✓ Created: FDA_Cardiac_Safety_Update_v14.pdf  [HRV_SDNN LT 30ms | Confidence ~0.93]")
 
 # ─────────────────────────────────────────────
-# PDF 2: EMA Draft - SpO2 monitoring (AMBIGUOUS)
+# PDF 2: EMA Draft - Heart Rate monitoring (AMBIGUOUS)
 # Confidence: ~0.58 → HUMAN REVIEW triggered
 # ─────────────────────────────────────────────
 def make_pdf2():
-    doc = SimpleDocTemplate("EMA_SpO2_Draft_Consultation_2026.pdf", pagesize=letter,
+    doc = SimpleDocTemplate("EMA_HeartRate_Draft_Consultation_2026.pdf", pagesize=letter,
                             rightMargin=0.75*inch, leftMargin=0.75*inch,
                             topMargin=0.75*inch, bottomMargin=0.75*inch)
     S = make_styles()
@@ -158,7 +158,7 @@ def make_pdf2():
     story.append(Spacer(1, 6))
     story.append(HRFlowable(width="100%", thickness=2, color=colors.HexColor('#003399')))
     story.append(Spacer(1, 6))
-    story.append(Paragraph("DRAFT CONCEPT PAPER\nRespiratory & SpO2 Monitoring in Metabolic Syndrome Trials", S['doctitle']))
+    story.append(Paragraph("DRAFT CONCEPT PAPER\nTachycardia & Heart Rate Monitoring in Metabolic Syndrome Trials", S['doctitle']))
     story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#003399')))
     story.append(Spacer(1, 6))
     story.append(Paragraph("Reference: EMA/CHMP/2026-DRAFT-091 | Status: PUBLIC CONSULTATION — NOT ADOPTED | Date: April 20, 2026", S['docmeta']))
@@ -171,26 +171,26 @@ def make_pdf2():
 
     story.append(Paragraph("1. INTRODUCTION", S['h2']))
     story.append(Paragraph(
-        "The intersection of metabolic syndrome and nocturnal hypoxia presents complex challenges in clinical "
-        "drug development. Novel incretin mimetics may affect respiratory drive. The EMA is reviewing current "
-        "monitoring standards to evaluate whether enhanced SpO2 monitoring should be mandated. This concept "
+        "The intersection of metabolic syndrome and drug-induced sympathomimetic activity presents complex challenges. "
+        "Novel incretin mimetics may elevate resting heart rate. The EMA is reviewing current "
+        "monitoring standards to evaluate whether enhanced Heart Rate monitoring should be mandated. This concept "
         "paper explores preliminary proposals and solicits expert opinion.", S['body']))
 
     story.append(Paragraph("2. PROPOSED MONITORING CONSIDERATIONS", S['h2']))
     story.append(Paragraph("2.1 — Preliminary Threshold Discussion (NOT FINAL)", S['h3']))
     story.append(Paragraph(
-        "Retrospective EMPA-RESP registry analysis suggests patients with nocturnal SpO2 dipping below "
-        "90% for periods exceeding 5 minutes may be at elevated cardiovascular risk. Some experts on the "
-        "CHMP advisory panel advocate for a threshold of SpO2 less than 94%. Others in the registry "
-        "working group suggest the intervention threshold may need to be below 96% to capture borderline "
-        "hypoxemia. The exact threshold value remains under statistical review.", S['body']))
+        "Retrospective registry analysis suggests patients with resting heart rate elevating above "
+        "100 bpm for periods exceeding 5 minutes may be at elevated cardiovascular risk. Some experts on the "
+        "CHMP advisory panel advocate for a threshold of Heart_Rate greater than 95 bpm. Others in the registry "
+        "working group suggest the intervention threshold may need to be above 90 bpm to capture borderline "
+        "tachycardia. The exact threshold value remains under statistical review.", S['body']))
 
     story.append(Paragraph("2.2 — Conflicting Expert Opinions", S['h3']))
     story.append(Paragraph(
         "NOTE: As of the date of this draft, no consensus has been reached. Annex 3 (pending) will "
-        "provide the final harmonized threshold value upon conclusion of expert consultation. The SpO2 "
-        "biomarker (designated SpO2 in EDC systems) and operator (Less Than) are proposed, but the "
-        "specific numeric cutoff — whether 90%, 94%, or 96% — remains unresolved pending final committee vote.", S['body']))
+        "provide the final harmonized threshold value upon conclusion of expert consultation. The Heart Rate "
+        "biomarker (designated Heart_Rate in EDC systems) and operator (Greater Than) are proposed, but the "
+        "specific numeric cutoff — whether 90 bpm, 95 bpm, or 100 bpm — remains unresolved pending final committee vote.", S['body']))
 
     story.append(Paragraph("3. NEXT STEPS", S['h2']))
     story.append(Paragraph(
@@ -200,7 +200,7 @@ def make_pdf2():
 
     footer(story, S, "EMA/CHMP/2026-DRAFT-091")
     doc.build(story)
-    print("✓ Created: EMA_SpO2_Draft_Consultation_2026.pdf  [SpO2 AMBIGUOUS | Confidence ~0.58 → HUMAN REVIEW]")
+    print("✓ Created: EMA_HeartRate_Draft_Consultation_2026.pdf  [Heart_Rate AMBIGUOUS | Confidence ~0.58 → HUMAN REVIEW]")
 
 # ─────────────────────────────────────────────
 # PDF 3: Emergency HRV raised to 32ms (v1.5)
@@ -334,6 +334,6 @@ if __name__ == "__main__":
     print("\n✅ All 4 PDFs generated successfully!")
     print("\n📋 DEMO CHEAT SHEET:")
     print("  PDF 1: FDA_Cardiac_Safety_Update_v14.pdf    → HRV_SDNN LT 30ms  | Confidence ~0.93 | Flags PT-0101, PT-0102, PT-0351 + more")
-    print("  PDF 2: EMA_SpO2_Draft_Consultation_2026.pdf → SpO2 AMBIGUOUS     | Confidence ~0.58 | HUMAN REVIEW triggered")
+    print("  PDF 2: EMA_HeartRate_Draft_Consultation_2026.pdf → Heart_Rate AMBIGUOUS     | Confidence ~0.58 | HUMAN REVIEW triggered")
     print("  PDF 3: FDA_Emergency_HRV_Alert_v15.pdf      → HRV_SDNN LT 32ms  | Confidence ~0.95 | MOST patients flagged (emergency)")
     print("  PDF 4: FDA_Tachycardia_Monitoring_2026.pdf  → Heart_Rate GT 95   | Confidence ~0.87 | Tachycardia patients flagged")

@@ -77,6 +77,10 @@ async def get_patients(
         hrv_readings = [r for r in p.readings if r.biomarker == "HRV_SDNN"]
         latest_hrv = hrv_readings[-1].value if hrv_readings else None
         
+        # Get latest Heart Rate
+        hr_readings = [r for r in p.readings if r.biomarker == "Heart_Rate"]
+        latest_hr = hr_readings[-1].value if hr_readings else None
+        
         # Get evaluation status
         evals = sorted(p.evaluations, key=lambda e: e.evaluated_at) if p.evaluations else []
         latest_eval = evals[-1] if evals else None
@@ -88,6 +92,7 @@ async def get_patients(
             "site_id": p.site_id,
             "status": p.status,
             "latest_hrv": latest_hrv,
+            "latest_hr": latest_hr,
             "is_flagged": is_flagged,
             "old_status": latest_eval.old_status if latest_eval else "SAFE",
             "new_status": latest_eval.new_status if latest_eval else "SAFE",
@@ -143,7 +148,184 @@ async def get_patient_readings(
     result = await db.execute(query)
     readings = result.scalars().all()
     
-    return {"id": id, "readings": readings}
+    readings_list = []
+    for r in readings:
+        readings_list.append({
+            "biomarker": r.biomarker,
+            "value": r.value,
+            "unit": r.unit,
+            "recorded_at": r.recorded_at.isoformat() if r.recorded_at else None
+        })
+    
+    return {"id": id, "readings": readings_list}
+
+@router.get("/{id}/pdf")
+async def get_patient_pdf(
+    id: str,
+    user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    from fastapi import Response
+    from sqlalchemy.orm import selectinload
+    from db.models import Patient
+    import io
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import cm
+    from reportlab.lib import colors
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+    from reportlab.lib.enums import TA_LEFT, TA_CENTER
+
+    # Normalize patient ID
+    patient_id = id if id.startswith("PT-") else f"PT-{id}"
+
+    query = select(Patient).options(selectinload(Patient.readings), selectinload(Patient.evaluations)).where(Patient.id == patient_id)
+    result = await db.execute(query)
+    patient = result.scalars().first()
+
+    if not patient:
+        return Response(status_code=404, content="Patient not found")
+
+    # Derive status
+    status_str = (patient.status or 'SAFE').upper()
+    is_flagged = status_str == 'AT_RISK'
+    status_label = 'AT RISK' if is_flagged else 'SAFE'
+
+    # Latest biomarkers
+    sorted_readings = sorted(patient.readings, key=lambda x: x.recorded_at, reverse=True) if patient.readings else []
+    latest_hrv = next((r.value for r in sorted_readings if r.biomarker == 'HRV_SDNN'), None)
+    latest_hr  = next((r.value for r in sorted_readings if r.biomarker == 'Heart_Rate'), None)
+
+    hrv_assessment = 'FLAGGED' if latest_hrv is not None and latest_hrv < 28 else 'NORMAL'
+    hr_assessment  = 'FLAGGED' if latest_hr is not None and latest_hr > 95 else 'NORMAL'
+    hrv_value_str  = f'{latest_hrv:.1f} ms' if latest_hrv is not None else 'N/A'
+    hr_value_str   = f'{latest_hr:.1f} bpm' if latest_hr is not None else 'N/A'
+
+    # Build PDF
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4,
+                            rightMargin=2*cm, leftMargin=2*cm,
+                            topMargin=2*cm, bottomMargin=2*cm)
+
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle('title', fontSize=20, fontName='Helvetica-Bold',
+                                  textColor=colors.HexColor('#0f172a'), spaceAfter=4)
+    subtitle_style = ParagraphStyle('subtitle', fontSize=11, fontName='Helvetica',
+                                     textColor=colors.HexColor('#64748b'), spaceAfter=12)
+    section_style = ParagraphStyle('section', fontSize=10, fontName='Helvetica-Bold',
+                                    textColor=colors.HexColor('#334155'), spaceBefore=16, spaceAfter=6)
+    body_style = ParagraphStyle('body', fontSize=10, fontName='Helvetica',
+                                  textColor=colors.HexColor('#1e293b'), spaceAfter=4)
+    risk_style = ParagraphStyle('risk', fontSize=10, fontName='Helvetica-Bold',
+                                  textColor=colors.HexColor('#b91c1c'), spaceAfter=4)
+    safe_style = ParagraphStyle('safe', fontSize=10, fontName='Helvetica-Bold',
+                                  textColor=colors.HexColor('#166534'), spaceAfter=4)
+
+    story = []
+
+    # Header
+    story.append(Paragraph("Patient Safety Report — ICSR", title_style))
+    story.append(Paragraph("Individual Case Safety Report · ReguVigil Multi-Agent Pipeline", subtitle_style))
+    story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#e2e8f0'), spaceAfter=12))
+
+    # Patient info table
+    info_data = [
+        ['Patient ID', patient_id, 'Trial', 'GlucoZen Phase III'],
+        ['Site', patient.site_id or 'Unknown', 'Status', status_label],
+    ]
+    info_table = Table(info_data, colWidths=[3*cm, 6*cm, 3*cm, 6*cm])
+    info_table.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (0,-1), colors.HexColor('#f1f5f9')),
+        ('BACKGROUND', (2,0), (2,-1), colors.HexColor('#f1f5f9')),
+        ('FONTNAME', (0,0), (0,-1), 'Helvetica-Bold'),
+        ('FONTNAME', (2,0), (2,-1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0,0), (-1,-1), 9),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#e2e8f0')),
+        ('PADDING', (0,0), (-1,-1), 6),
+        ('TEXTCOLOR', (3,1), (3,1), colors.HexColor('#b91c1c') if is_flagged else colors.HexColor('#166534')),
+        ('FONTNAME', (3,1), (3,1), 'Helvetica-Bold'),
+    ]))
+    story.append(info_table)
+    story.append(Spacer(1, 0.4*cm))
+
+    # Executive Summary
+    story.append(Paragraph("Executive Summary", section_style))
+    summary = f"This report details the clinical status of patient <b>{patient_id}</b> enrolled at <b>{patient.site_id}</b> in the GlucoZen Phase III trial."
+    story.append(Paragraph(summary, body_style))
+    if is_flagged:
+        story.append(Paragraph("⚠ This patient has been classified AT RISK. Immediate clinical review is recommended.", risk_style))
+
+    # Biomarker summary
+    story.append(Paragraph("Latest Biomarker Summary", section_style))
+    bio_data = [
+        ['Metric', 'Value', 'Threshold', 'Assessment'],
+        ['HRV SDNN', hrv_value_str, '< 28 ms → FLAG', hrv_assessment],
+        ['Heart Rate', hr_value_str, '> 95 bpm → FLAG', hr_assessment],
+    ]
+    bio_table = Table(bio_data, colWidths=[4.5*cm, 3.5*cm, 5*cm, 4*cm])
+    bio_table.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#f1f5f9')),
+        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0,0), (-1,-1), 9),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#e2e8f0')),
+        ('PADDING', (0,0), (-1,-1), 6),
+        ('TEXTCOLOR', (3,1), (3,1), colors.HexColor('#b91c1c') if hrv_assessment=='FLAGGED' else colors.HexColor('#166534')),
+        ('TEXTCOLOR', (3,2), (3,2), colors.HexColor('#b91c1c') if hr_assessment=='FLAGGED' else colors.HexColor('#166534')),
+        ('FONTNAME', (3,1), (3,2), 'Helvetica-Bold'),
+    ]))
+    story.append(bio_table)
+    story.append(Spacer(1, 0.4*cm))
+
+    # Recent readings
+    story.append(Paragraph("Recent Biomarker Data (Last 30 readings)", section_style))
+    reading_data = [['Date', 'Biomarker', 'Value']]
+    for r in sorted_readings[:30]:
+        reading_data.append([
+            r.recorded_at.strftime('%Y-%m-%d'),
+            r.biomarker,
+            f'{r.value:.2f} {r.unit}'
+        ])
+    reading_table = Table(reading_data, colWidths=[4*cm, 6*cm, 7*cm])
+    reading_table.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#f1f5f9')),
+        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0,0), (-1,-1), 8),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#e2e8f0')),
+        ('PADDING', (0,0), (-1,-1), 5),
+        ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#f8fafc')]),
+    ]))
+    story.append(reading_table)
+
+    # Recommended actions for AT RISK
+    if is_flagged:
+        story.append(Spacer(1, 0.4*cm))
+        story.append(Paragraph("Recommended Actions", ParagraphStyle('rsection', fontSize=10, fontName='Helvetica-Bold',
+                                                                      textColor=colors.HexColor('#b91c1c'), spaceBefore=16, spaceAfter=6)))
+        for action in [
+            f"Conduct immediate cardiac review of patient {patient_id}.",
+            "Temporarily suspend dosing pending secondary diagnostics.",
+            "Submit expedited protocol deviation notice if condition worsens."
+        ]:
+            story.append(Paragraph(f"• {action}", body_style))
+
+    # Footer
+    story.append(Spacer(1, 0.6*cm))
+    story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor('#e2e8f0')))
+    story.append(Spacer(1, 0.2*cm))
+    story.append(Paragraph("Generated by ReguVigil Multi-Agent Pipeline · Gemini 2.5 Flash · ICH E6 (R2) Aligned",
+                            ParagraphStyle('footer', fontSize=8, fontName='Helvetica',
+                                           textColor=colors.HexColor('#94a3b8'), alignment=TA_CENTER)))
+
+    doc.build(story)
+    pdf_bytes = buffer.getvalue()
+    buffer.close()
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=Patient_Report_{patient_id}.pdf"}
+    )
+
 
 @router.post("/{id}/notify")
 async def notify_doctor(

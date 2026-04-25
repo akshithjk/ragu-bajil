@@ -68,11 +68,11 @@ PREBAKED_RESULTS = {
         effective_date="June 1, 2026", confidence_score=0.93,
         source_url="FDA-CDER-2026-CARD-004", page_reference="Section 4.2"
     ),
-    "spo2_draft": GuidelineExtraction(
-        biomarker="SpO2", operator="LT", old_value=0.0, new_value=94.0,
-        unit="%", duration_days=30, trial_phases=["Phase III"],
+    "heart_rate_draft": GuidelineExtraction(
+        biomarker="Heart_Rate", operator="GT", old_value=0.0, new_value=95.0,
+        unit="bpm", duration_days=30, trial_phases=["Phase III"],
         effective_date="TBD", confidence_score=0.58,
-        source_url="EMA/CHMP/2026-DRAFT-091", page_reference="Section 5.3"
+        source_url="EMA/CHMP/2026-DRAFT-091", page_reference="Section 2.2"
     ),
     "emergency_hrv_alert_v15": GuidelineExtraction(
         biomarker="HRV_SDNN", operator="LT", old_value=30.0, new_value=32.0,
@@ -96,11 +96,11 @@ def _prebaked_fallback(pdf_source: str) -> GuidelineExtraction:
             print(f"[Agent1] Using pre-baked result for: {key}")
             return result
             
-    # Generic fallback based on digits in filename if user names it "pdf 1.pdf"
-    if "1" in name: return PREBAKED_RESULTS["cardiac_safety_update_v14"]
-    if "2" in name: return PREBAKED_RESULTS["spo2_draft"]
-    if "3" in name: return PREBAKED_RESULTS["emergency_hrv_alert_v15"]
-    if "4" in name: return PREBAKED_RESULTS["tachycardia_monitoring"]
+    # Generic fallback based on keywords in filename
+    if "cardiac_safety" in name or "v14" in name: return PREBAKED_RESULTS["cardiac_safety_update_v14"]
+    if "heartrate_draft" in name or "draft" in name: return PREBAKED_RESULTS["heart_rate_draft"]
+    if "emergency" in name or "v15" in name: return PREBAKED_RESULTS["emergency_hrv_alert_v15"]
+    if "tachycardia" in name: return PREBAKED_RESULTS["tachycardia_monitoring"]
     
     # Ultimate fallback if nothing matches
     raise ValueError("IRRELEVANT_DOCUMENT: The uploaded PDF does not contain relevant regulatory or pharmacovigilance data for this demo.")

@@ -36,6 +36,7 @@ const GlobeVisualization: React.FC<GlobeVisualizationProps> = ({ siteFlags, site
   const containerRef = useRef<HTMLDivElement>(null);
   const [GlobeGL, setGlobeGL] = useState<any>(null);
   const [hovered, setHovered] = useState<SiteData | null>(null);
+  const [dimensions, setDimensions] = useState({ width: 600, height: 500 });
 
   // Dynamically import to avoid SSR issues
   useEffect(() => {
@@ -43,6 +44,32 @@ const GlobeVisualization: React.FC<GlobeVisualizationProps> = ({ siteFlags, site
       setGlobeGL(() => mod.default);
     });
   }, []);
+
+  // Fix globe offset by dynamically observing container size
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const observer = new ResizeObserver((entries) => {
+      for (let entry of entries) {
+        if (entry.contentRect.width > 0 && entry.contentRect.height > 0) {
+          setDimensions({
+            width: entry.contentRect.width,
+            height: entry.contentRect.height
+          });
+        }
+      }
+    });
+    observer.observe(containerRef.current);
+    
+    // Initial check
+    if (containerRef.current.offsetWidth > 0) {
+      setDimensions({
+        width: containerRef.current.offsetWidth,
+        height: containerRef.current.offsetHeight
+      });
+    }
+    
+    return () => observer.disconnect();
+  }, [GlobeGL]); // Re-run when GlobeGL loads to ensure container is mounted
 
   const siteData: SiteData[] = SITES.map(s => ({
     ...s,
@@ -64,7 +91,7 @@ const GlobeVisualization: React.FC<GlobeVisualizationProps> = ({ siteFlags, site
 
   if (!GlobeGL) {
     return (
-      <div className="flex items-center justify-center h-full">
+      <div className="flex items-center justify-center h-full w-full bg-slate-900 rounded-2xl">
         <div className="flex flex-col items-center gap-3 text-slate-400">
           <span className="w-8 h-8 border-2 border-slate-600 border-t-blue-400 rounded-full animate-spin" />
           <span className="text-sm font-mono">Loading Globe...</span>
@@ -74,11 +101,11 @@ const GlobeVisualization: React.FC<GlobeVisualizationProps> = ({ siteFlags, site
   }
 
   return (
-    <div className="relative w-full h-full" ref={containerRef}>
+    <div className="relative w-full h-full bg-slate-900 overflow-hidden rounded-2xl" ref={containerRef}>
       <GlobeGL
         ref={globeRef}
-        width={containerRef.current?.offsetWidth || 600}
-        height={containerRef.current?.offsetHeight || 500}
+        width={dimensions.width}
+        height={dimensions.height}
         backgroundColor="rgba(0,0,0,0)"
         globeImageUrl="//cdn.jsdelivr.net/npm/three-globe/example/img/earth-night.jpg"
         bumpImageUrl="//cdn.jsdelivr.net/npm/three-globe/example/img/earth-topology.png"

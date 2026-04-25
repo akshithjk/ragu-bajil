@@ -5,6 +5,7 @@ import { usePatients, usePatientStats, usePipelineStatus } from '../api/queries'
 import GlobeVisualization, { SITES } from '../components/GlobeVisualization';
 import { motion, AnimatePresence } from 'framer-motion';
 
+
 type FilterMode = 'all' | 'flagged' | 'by_site' | 'by_biomarker';
 
 export const SITE_NAMES: Record<string, string> = {
@@ -40,6 +41,7 @@ export const DataManagerDashboard: React.FC = () => {
       siteId: p.site_id,
       hospital: SITE_NAMES[p.site_id] || p.site_id,
       hrv: p.latest_hrv != null ? Math.round(p.latest_hrv) : null,
+      hr: p.latest_hr != null ? Math.round(p.latest_hr) : null,
       status: p.is_flagged ? 'AT_RISK' : 'SAFE',
     }));
   }, [patientsData]);
@@ -170,6 +172,8 @@ export const DataManagerDashboard: React.FC = () => {
           </button>
         </div>
       </div>
+
+
 
       {/* Stat Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -306,6 +310,7 @@ export const DataManagerDashboard: React.FC = () => {
               <th className="px-6 py-4 font-semibold">Site</th>
               <th className="px-6 py-4 font-semibold">Hospital</th>
               <th className="px-6 py-4 font-semibold">HRV (latest)</th>
+              <th className="px-6 py-4 font-semibold">Heart Rate</th>
               <th className="px-6 py-4 font-semibold">Status</th>
               <th className="px-6 py-4 font-semibold">Action</th>
             </tr>
@@ -348,9 +353,15 @@ export const DataManagerDashboard: React.FC = () => {
                     <td className="px-6 py-3.5 text-slate-600">{p.hospital}</td>
                     <td className={`px-6 py-3.5 font-mono font-bold ${
                       p.hrv == null ? 'text-slate-400' :
-                      isRisk ? 'text-red-600' : 'text-slate-700'
+                      isRisk && (!p.hr || p.hr <= 95) ? 'text-red-600' : 'text-slate-700'
                     }`}>
                       {p.hrv != null ? `${p.hrv}ms` : '—'}
+                    </td>
+                    <td className={`px-6 py-3.5 font-mono font-bold ${
+                      p.hr == null ? 'text-slate-400' :
+                      isRisk && p.hr > 95 ? 'text-red-600' : 'text-slate-700'
+                    }`}>
+                      {p.hr != null ? `${p.hr} bpm` : '—'}
                     </td>
                     <td className="px-6 py-3.5">
                       <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold ${

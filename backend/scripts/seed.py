@@ -24,8 +24,12 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 async def seed_db():
     print("Seeding database...")
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
+        from sqlalchemy import text
+        try:
+            await conn.execute(text("TRUNCATE TABLE users, trials, trial_sites, patients, biomarker_readings, patient_evaluations, pv_reports, guidelines, monitoring_rules, audit_logs, pipeline_runs, pipeline_agent_status, pipeline_logs CASCADE;"))
+        except Exception:
+            pass # In case some tables don't exist yet
 
     async with AsyncSessionLocal() as db:
         
@@ -83,8 +87,8 @@ async def seed_db():
         # Add special patients
         special_patients = [
             {"id": "PT-8091", "site": "site-3", "target_hrv": 24, "age": 62, "gender": "Female"},
-            {"id": "PT-1102", "site": "site-3", "target_hrv": 26, "age": 58, "gender": "Male"},
-            {"id": "PT-4399", "site": "site-8", "target_hrv": 27.5, "age": 67, "gender": "Male"},
+            {"id": "PT-8102", "site": "site-3", "target_hrv": 26, "age": 58, "gender": "Male"},
+            {"id": "PT-8399", "site": "site-8", "target_hrv": 27.5, "age": 67, "gender": "Male"},
         ]
         
         for sp in special_patients:
@@ -95,7 +99,7 @@ async def seed_db():
         for i in range(497):
             site_id = f"site-{random.randint(1, 10)}"
             p_id = f"PT-{1000 + patient_idx}"
-            if p_id not in ["PT-8091", "PT-1102", "PT-4399"]:
+            if p_id not in ["PT-8091", "PT-8102", "PT-8399"]:
                 p = Patient(id=p_id, trial_id="trial-glucozen-001", site_id=site_id, status="ACTIVE")
                 patients.append(p)
             patient_idx += 1
@@ -186,7 +190,15 @@ async def seed_db():
         db.add(report)
         
         await db.commit()
-        print("Database seeded successfully!")
+        
+        # Reset sequences so future inserts don't fail with duplicate key errors
+        from sqlalchemy import text
+        await db.execute(text("SELECT setval('guidelines_id_seq', (SELECT MAX(id) FROM guidelines));"))
+        await db.execute(text("SELECT setval('monitoring_rules_id_seq', (SELECT MAX(id) FROM monitoring_rules));"))
+        await db.execute(text("SELECT setval('pv_reports_id_seq', (SELECT MAX(id) FROM pv_reports));"))
+        await db.commit()
+        
+        print("Database seeded and sequences reset successfully!")
 
 if __name__ == "__main__":
     asyncio.run(seed_db())
