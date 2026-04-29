@@ -41,8 +41,8 @@ ReguVigil is a **multi-agent AI pharmacovigilance platform** that:
 
 ```bash
 # Clone and launch the entire stack
-git clone https://github.com/akshithjk/reguvigil-xypheria-2026.git
-cd reguvigil-xypheria-2026
+git clone https://github.com/akshithjk/reguvigil.git
+cd reguvigil
 
 # Configure environment
 cp .env.example .env
